@@ -2,3 +2,11 @@ Keras and TensorFlow source for RNN tutorial.
 
 Builds a simple RNN discriminator to distinguish between English and
 German/French words.
+
+Run
+
+#+BEGIN_SRC sh
+python3 run_example.py -h
+#+END_SRC
+
+to see the usage information.
