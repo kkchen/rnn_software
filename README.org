@@ -1,0 +1,4 @@
+Keras and TensorFlow source for RNN tutorial.
+
+Builds a simple RNN discriminator to distinguish between English and
+German/French words.
