@@ -3,47 +3,76 @@
 import string
 import numpy as np
 
-def get_data(max_length):
-    """Return one-hot English and German words, along with language labels.
+def get_data(max_length, language, tensorflow=False):
+    """Return one-hot English and foreign words, along with language labels.
 
     Each character is one-hot encoded, ande words shorter than max_length are
     padded with end-of-word tokens.  Words longer than max_length are excluded.
 
-    The data are returned as x, y.  x is a (# words) x max_length x (# chars +
-    1) array (where (# chars) = 26 and the extra character is the end-of-string
-    token).  y is a (# words)-long label vector, where a label of 0 indicates
-    English and 1 indicates German.
+    The data are returned as x, y.  For Keras, x is a (# words) x max_length x
+    (# chars) array (where (# chars) = 27; the extra character is the
+    end-of-string token).  For TensorFlow, x is a max_length x (# words) x (#
+    chars) array.
+
+    For Keras, y is a (# words)-long label vector, where a label of 0 indicates
+    English and 1 indicates German/French.  For TensorFlow, y is (# words) x 1.
     """
     # Read lists of English and German words.
     with open('english.txt') as f:
         english = f.read().split()
 
-    german = _process_german()
+    if language == 'german':
+        foreign = _process_german()
+    elif language == 'french':
+        foreign = _process_french()
+    else:
+        raise ValueError('Invalid language "{}".'.format(language))
 
     # One-hot encode lists of words, up to a maximum length.
     english_encoded = one_hot(english, max_length)
-    german_encoded = one_hot(german, max_length)
+    foreign_encoded = one_hot(foreign, max_length)
 
-    # Combine the one-hot-encoded words, along with labels, where 0 means
-    # English and 1 means German.
-    x = np.concatenate((english_encoded, german_encoded))
-    y = np.concatenate(
-        (np.zeros(len(english_encoded)), np.ones(len(german_encoded)))
-    )
+    # Combine the one-hot-encoded words.
+    x = np.concatenate((english_encoded, foreign_encoded))
 
     # Shuffle the data.
-    ind = np.arange(len(y))
+    ind = np.arange(x.shape[0])
     np.random.shuffle(ind)
     x = x[ind, :, :]
+
+    # Create labels, where a 0 value or index means English and 1 means
+    # German/French, and shuffle.
+    y = np.r_[np.zeros(len(english)), np.ones(len(foreign))]
     y = y[ind]
+
+    if tensorflow:
+        # TensorFlow needs the input data to be length x batch x chars, not
+        # batch x length x chars.
+        x = np.transpose(x, (1, 0, 2))
+        # TensorFlow needs the output to be batch x 1.
+        y = np.expand_dims(y, 1)
 
     return x, y
 
 
-def one_hot(words, max_length=None):
+def get_test_data():
+    """Return a pre-selected short list of test words."""
+    words = ['informatic', 'armature', 'conditioner', 'baste', 'helical',
+             'lamentation', 'surging', 'surjective']
+    words += ['kostritzer', 'krombacher', 'erhard', 'janssen', 'hasseroder',
+              'wernesgruner', 'franziskaner', 'oettingen', 'warstein']
+
+    return words
+
+
+def one_hot(words, max_length=None, transpose=False):
     """Take in a list of words with a-z chars, and return as one-hot array.
 
-    Ignore words longer than max_length if max_length is not None.
+    The indices are [batch, word, letter].  Ignore words longer than max_length
+    if max_length is not None.
+
+    If transpose is True, then return as length x batch x chars rather than
+    batch x length x chars.
     """
     if max_length is None:
         # Compute the maximum length.
@@ -74,7 +103,7 @@ def one_hot(words, max_length=None):
         for j in range(j + 1, max_length):
             result[i][j][-1] = 1 # Encode the end-of-word token.
 
-    return result
+    return np.transpose(result, (1, 0, 2)) if transpose else result
 
 
 def _process_french():
@@ -82,7 +111,7 @@ def _process_french():
 
     The raw dictionary is read from french.txt.  Return the new list.
     """
-    return _process('french.txt', ('ä', 'é', 'ü'), ('a', 'e', 'u'), ".-")
+    return _process('french.txt', ('ä', 'é', 'ü'), ('a', 'e', 'u'), ".-'")
 
 
 def _process_german():

@@ -1,222 +1,74 @@
-"""Keras RNN example."""
+"""Simple Keras RNN example.
 
-import string
+Builds, trains, and tests an RNN discriminator that distinguishes between
+English and German/French.
+"""
 
-import numpy as np
-import keras
+import warnings
 
-from discriminator import Discriminator
+with warnings.catch_warnings():
+    warnings.simplefilter('ignore', RuntimeWarning)
+    warnings.simplefilter('ignore', FutureWarning)
+
+    from tensorflow import keras
+
 import text
 
-class KerasDiscriminator(Discriminator):
+def keras_example(args):
+    """Build, train, and test the discriminator using the Keras frontend."""
+    # Get one-hot encoded English and German/French words.
+    x, y = text.get_data(args.length, args.language)
+    implementation = 2 if args.gpu else 0, # Optimize matrix sizes.
 
-    """Class that holds several Keras models for discriminating."""
-
-    def __init__(self, args):
-        super().__init__(args)
-        # Options to pass to RNNs.
-        self._kw = {'recurrent_activation': 'sigmoid', 'unroll': True}
-
-        self.model = keras.models.Sequential() # The Keras model.
-        getattr(self, '_' + args.model)() # Build the Keras model’s layers.
-
-    def compile(self):
-        """Compile the Keras model."""
-        self.model.summary() # Print the layers.
-        self.model.compile('adam', 'binary_crossentropy', metrics=['accuracy'])
-
-    def train(self, x, y):
-        """Train the RNN on input data x and binary labels y.
-
-        x should have dimensions (# words) x max_length x (# chars + 1), and y
-        should have dimension (# words).
-        """
-        self.model.fit(
-            x,
-            y,
-            self._batch_size,
-            self._epochs,
-            validation_split=self._validation_split
+    # The Keras neural network model.
+    discriminator = keras.models.Sequential()
+    # The first LSTM layer.
+    discriminator.add(
+        keras.layers.LSTM(
+            args.n_state,
+            return_sequences=True, # Keep outputs from all time steps.
+            input_shape=(x.shape[1], x.shape[2]),
+            implementation=implementation,
+            recurrent_activation='sigmoid',
+            unroll=True # Faster performance but more memory consumption.
         )
-
-    def label(self, words):
-        """Label the given words."""
-        words_encoded = text.one_hot(words, self._max_length)
-        labels = self.model.predict(words_encoded)
-
-        # Print predictions.
-        print('\nWord: P(German)')
-
-        for word, label in zip(words, labels):
-            print('{}: {}'.format(word, float(label)))
-
-    def _baseline(self):
-        """Multi-layer baseline model."""
-        # LSTM layer 1.  Retain outputs across all time steps.  Only the first
-        # layer needs to specify input_shape.
-        self.model.add(
-            keras.layers.LSTM(
-                self._n_state,
-                return_sequences=True,
-                input_shape=(self._max_length, len(string.ascii_lowercase) + 1),
-                **self._kw
-            )
+    )
+    #The second LSTM layer.  Only keep the output from the final time step.
+    discriminator.add(
+        keras.layers.LSTM(
+            args.n_state,
+            return_sequences=False,
+            implementation=implementation,
+            recurrent_activation='sigmoid',
+            unroll=True
         )
+    )
+    # Dense layer.
+    discriminator.add(keras.layers.Dense(1, activation='sigmoid'))
 
-        # Intermediate RNN layers.  Return outputs from all time steps.
-        for i in range(self._layers - 2):
-            self.model.add(
-                keras.layers.LSTM(
-                    self._n_state,
-                    return_sequences=True,
-                    **self._kw
-                )
-            )
+    # Compile the Keras model.
+    discriminator.summary()
+    discriminator.compile('adam', 'binary_crossentropy', metrics=['accuracy'])
 
-        # Final RNN layer.  Only output the final time step’s output.
-        self.model.add(keras.layers.LSTM(self._n_state, **self._kw))
-        # Dense layer on the final output of the LSTM.
-        self.model.add(keras.layers.Dense(1, activation='sigmoid'))
+    # Train the Keras model.
+    discriminator.fit(
+        x,
+        y,
+        args.batch_size,
+        args.n_epochs,
+        validation_split=args.validation_split
+    )
 
-    def _bidirectional(self):
-        """Bidirectional model."""
-        # First RNN.
-        self.model.add(
-            keras.layers.Bidirectional(
-                keras.layers.LSTM(
-                    self._n_state,
-                    return_sequences=True,
-                    **self._kw
-                ),
-                input_shape=(self._max_length, len(string.ascii_lowercase) + 1)
-            )
-        )
+    # Save the model.
+    discriminator.save('keras_example.h5')
 
-        # Intermediate RNNs.  Return outptus from all time steps.
-        for i in range(self._layers - 2):
-            self.model.add(
-                keras.layers.Bidirectional(
-                    keras.layers.LSTM(
-                        self._n_state,
-                        return_sequences=True,
-                        **self._kw
-                    )
-                )
-            )
+    # Label test words.
+    test_words = text.get_test_data()
+    words_encoded = text.one_hot(test_words, args.length)
+    test_labels = discriminator.predict(words_encoded)
 
-        # Final RNN.
-        self.model.add(
-            keras.layers.Bidirectional(
-                keras.layers.LSTM(self._n_state, **self._kw)
-            )
-        )
-        self.model.add(keras.layers.Dense(1, activation='sigmoid'))
+    # Print predictions.
+    print('\nWord: P({})'.format(args.language.capitalize()))
 
-    def _all_outputs(self):
-        """All outputs from the 2nd layer go to the dense layer."""
-        # RNN layer 1.  Retain outputs across all time steps.
-        self.model.add(
-            keras.layers.LSTM(
-                self._n_state,
-                return_sequences=True,
-                input_shape=(self._max_length, len(string.ascii_lowercase) + 1),
-                **self._kw
-            )
-        )
-
-        # All other RNNs.  Retain outputs across all time steps.
-        for i in range(self._layers - 1):
-            self.model.add(
-                keras.layers.LSTM(
-                    self._n_state,
-                    return_sequences=True,
-                    **self._kw
-                )
-            )
-
-        # Flatten all the outputs across all time steps.
-        self.model.add(keras.layers.Flatten())
-        # Output a single scalar from all time steps.
-        self.model.add(keras.layers.Dense(1, activation='sigmoid'))
-
-    def _noise_dropout(self):
-        """Model with input Gaussian noise, and dropout in all layers."""
-        dropout = 0.3
-
-        # Add Gaussian noise at the input.
-        self.model.add(
-            keras.layers.GaussianNoise(
-                0.1,
-                input_shape=(self._max_length, len(string.ascii_lowercase) + 1)
-            )
-        )
-        # First RNN layer.
-        self.model.add(
-            keras.layers.LSTM(
-                self._n_state,
-                return_sequences=True,
-                dropout=dropout, # Input-to-state dropout.
-                recurrent_dropout=dropout, # State-to-state dropout.
-                input_shape=(self._max_length, len(string.ascii_lowercase) + 1),
-                **self._kw
-            )
-        )
-
-        # Intermediate RNN layers.  Keep outputs from all time steps.
-        for i in range(self._layers - 2):
-            self.model.add(
-                keras.layers.LSTM(
-                    self._n_state,
-                    return_sequences=True,
-                    dropout=dropout,
-                    recurrent_dropout=dropout,
-                    **self._kw
-                )
-            )
-
-        # Final RNN layer.  Only keep the output from the final time step.
-        self.model.add(
-            keras.layers.LSTM(
-                self._n_state,
-                dropout=dropout,
-                recurrent_dropout=dropout,
-                **self._kw
-            )
-        )
-
-        # Apply dropout and then the final dense layer.
-        self.model.add(keras.layers.Dropout(dropout))
-        self.model.add(keras.layers.Dense(1, activation='sigmoid'))
-
-    def _deep_output(self):
-        """Model with a deep LSTM output."""
-        # First RNN layer.
-        self.model.add(
-            keras.layers.LSTM(
-                self._n_state,
-                return_sequences=True,
-                input_shape=(self._max_length, len(string.ascii_lowercase) + 1),
-                **self._kw
-            )
-        )
-
-        # All other RNN layers.
-        for i in range(self._layers - 1):
-            self.model.add(
-                keras.layers.LSTM(
-                    self._n_state,
-                    return_sequences=True,
-                    **self._kw
-                )
-            )
-
-        # Every time step gets the same dense layer.
-        self.model.add(
-            keras.layers.TimeDistributed(
-                keras.layers.Dense(self._n_state // 2, activation='relu')
-            )
-        )
-        # Collect all outputs across time.
-        self.model.add(keras.layers.Flatten())
-        # Output a single scalar across time.
-        self.model.add(keras.layers.Dense(1, activation='sigmoid'))
+    for word, label in zip(test_words, test_labels):
+        print('{}: {:.3f}'.format(word, float(label)))

@@ -1,3 +1,6 @@
+*.ckpt.*
+*.h5
 *.pyc
 *~
 __pycache__
+checkpoint

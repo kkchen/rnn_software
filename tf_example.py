@@ -1,72 +1,117 @@
 """TensorFlow RNN example."""
 
+import warnings
+
+import os
 import string
 
-import numpy as np
-import tensorflow as tf
+with warnings.catch_warnings():
+    warnings.simplefilter('ignore', RuntimeWarning)
+    warnings.simplefilter('ignore', FutureWarning)
 
-from discriminator import Discriminator
+    import tensorflow as tf
+
+from dataset import Dataset
+from iterator import Iterator
 import text
 
-class TFDiscriminator(Discriminator):
+def tf_example(args):
+    """Build, train, and test the discriminator using TensorFlow frontend."""
+    dtype = tf.float32
 
-    """Class that holds several TensorFlow models for discriminating."""
+    # Get one-hot encoded English and German/French words.
+    words, labels = text.get_data(args.length, args.language, True)
+    data = Dataset(words, labels, args.validation_split)
+    iterator = Iterator(data, args.n_epochs, args.batch_size)
 
-    def __init__(self, args, dataset):
-        super().__init__(args)
-        self._dataset = dataset
-        self._dataset.batch(self._batch_size)
-        self._dataset.repeat(self._epochs)
-        self._iterator = self._dataset.make_one_shot_iterator()
+    # Model input and output.
+    with tf.name_scope('io'):
+        x = tf.placeholder(dtype, [words.shape[0], None, words.shape[2]], 'x')
+        y = tf.placeholder(dtype, [None, 1], 'y')
 
-    def compile(self):
-        pass
+    # The neural network.
+    with tf.variable_scope('lstm0'):
+        lstm0 = tf.contrib.rnn.LSTMBlockFusedCell(args.n_state)
+        lstm0_output, lstm0_state = lstm0(x, dtype=dtype)
 
-    def train(self, x, y):
-        pass
+    with tf.variable_scope('lstm1'):
+        lstm1 = tf.contrib.rnn.LSTMBlockFusedCell(args.n_state)
+        lstm1_output, lstm1_state = lstm1(lstm0_output, dtype=dtype)
 
-    def label(self, words):
-        pass
+    with tf.variable_scope('dense'):
+        # Apply the sigmoid in the loss, not in the dense layer.
+        logits = tf.layers.dense(lstm1_output[-1, :, :], 1, name='logits')
 
-    def _baseline(self):
-        """2-layer baseline model."""
-        x, y = self._iterator.get_next()
-        # Unlike Keras, TensorFlow needs RNN input to be arranged as (length,
-        # batch, inputs).
-        x = tf.transpose(x, [1, 0, 2], 'transposed_input')
+    # The training loss.
+    with tf.name_scope('loss'):
+        loss = tf.losses.sigmoid_cross_entropy(y, logits)
 
-        cell = tf.contrib.LSTMBlockFusedCell(self._n_state)
-        lstms = tf.contrib.rnn.MultiRNNCell([cell for i in range(self._layers)])
-        state = cell.zero_state(self._batch_size, tf.float32)
-        lstm_output, new_state = lstm(x, state)
-        dense_output = tf.layers.dense(
-            tf.squeeze(lstm_output[-1, :]),
-            1,
-            tf.sigmoid,
-            name='dense_output'
+    # Classification accuracy.  y = 1 iff logits > 0.
+    with tf.name_scope('accuracy'):
+        correct = tf.cast(
+            tf.equal(tf.cast(y, tf.bool), tf.greater(logits, 0)),
+            dtype
         )
+        accuracy = tf.reduce_mean(correct)
 
-    def _bidirectional(self):
-        """Bidirectional model."""
-        pass
+    # The optimizer.
+    with tf.name_scope('optimizer'):
+        optimizer = tf.train.AdamOptimizer()
+        global_step = tf.Variable(0, False, name='global_step')
 
-    def _all_outputs(self):
-        """All outputs from the 2nd layer go to the dense layer."""
-        pass
+    # The training operation.
+    with tf.name_scope('train'):
+        train_op = optimizer.minimize(loss, global_step)
 
-    def _noise_dropout(self):
-        """Model with input Gaussian noise, and dropout in all layers."""
-        dropout = 0.3
-        pass
+    # Label inputs.
+    with tf.name_scope('predict'):
+        label = tf.sigmoid(logits, 'label')
 
-    def _deep_output(self):
-        """Model with a deep LSTM output."""
-        pass
+    # One-hot encoded words to label.
+    test_words = text.get_test_data()
+    words_encoded = text.one_hot(test_words, args.length, True)
 
+    # Run the training and testing.
+    with tf.Session() as session:
+        tf.global_variables_initializer().run()
 
-def get_dataset(x, y):
-    """Get a TensorFlow dataset for the input data x and labels y."""
-    return tf.data.Dataset.from_tensor_slices(
-        {'x': tf.constant(x, name='encoded_words'),
-         'y': tf.constant(y, name='labels')}
-    )
+        # Run through the minibatches.
+        for data_x, data_y in iterator:
+            # Run the training operation and get the loss.
+            train_op.run({x: data_x, y: data_y})
+
+            # Report diagnostics at every epoch.
+            if iterator.new_epoch:
+                # Report training loss and accuracy.
+                train_loss, train_accuracy = session.run(
+                    [loss, accuracy],
+                    {x: data_x, y: data_y}
+                )
+                # Report validation loss and accuracy.
+                val_loss, val_accuracy = session.run(
+                    [loss, accuracy],
+                    {x: data.x['val'], y: data.y['val']}
+                )
+
+                print('Epoch {}:'.format(iterator.epoch))
+                print(
+                    '    Train: loss = {:.6f}, accuracy = {:.6f}'
+                    .format(train_loss, train_accuracy)
+                )
+                print(
+                    '    Validation: loss = {:.6f}, accuracy = {:.6f}'
+                    .format(val_loss, val_accuracy)
+                )
+
+        # Label words.
+        test_labels = label.eval({x: words_encoded})
+
+        # Save all variables.
+        saver = tf.train.Saver()
+        saver.save(session, os.getcwd() + '/tf_example.ckpt')
+
+    # Print predictions.
+    print('\nWord: P({})'.format(args.language.capitalize()))
+
+    for word, label in zip(test_words, test_labels):
+        print('{}: {:.3f}'.format(word, float(label)))
