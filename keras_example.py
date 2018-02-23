@@ -63,7 +63,7 @@ def keras_example(args):
     discriminator.save('keras_example.h5')
 
     # Label test words.
-    test_words = text.get_test_data()
+    test_words = text.get_test_data(args.language)
     words_encoded = text.one_hot(test_words, args.length)
     test_labels = discriminator.predict(words_encoded)
 

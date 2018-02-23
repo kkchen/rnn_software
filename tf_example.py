@@ -68,7 +68,7 @@ def tf_example(args):
         label = tf.sigmoid(logits, 'label')
 
     # One-hot encoded words to label.
-    test_words = text.get_test_data()
+    test_words = text.get_test_data(args.language)
     words_encoded = text.one_hot(test_words, args.length, True)
 
     # Run the training and testing.

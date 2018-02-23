@@ -55,12 +55,17 @@ def get_data(max_length, language, tensorflow=False):
     return x, y
 
 
-def get_test_data():
+def get_test_data(language):
     """Return a pre-selected short list of test words."""
     words = ['informatic', 'armature', 'conditioner', 'baste', 'helical',
              'lamentation', 'surging', 'surjective']
-    words += ['kostritzer', 'krombacher', 'erhard', 'janssen', 'hasseroder',
-              'wernesgruner', 'franziskaner', 'oettingen', 'warstein']
+
+    if language == 'german':
+        words += ['kostritzer', 'krombacher', 'erhard', 'janssen', 'hasseroder',
+                  'wernesgruner', 'franziskaner', 'oettingen', 'warstein']
+    elif language == 'french':
+        words += ['loisible', 'flaner', 'depayser', 'aveugle', 'escalier',
+                  'exquise', 'cartonner', 'retrouvailles', 'tartiner']
 
     return words
 
